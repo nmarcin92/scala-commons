@@ -120,9 +120,9 @@ The real-to-raw translation is done by the RPC framework automatically. The prog
 
 ```scala
 trait RawRPC {
-  def fire(rpcName: String, argLists: List[List[RawValue]]): Unit
-  def call(rpcName: String, argLists: List[List[RawValue]]): Future[RawValue]
-  def get(rpcName: String, argLists: List[List[RawValue]]): RawRPC
+  def fire(rpcName: String, args: BMap[String,RawValue]): Unit
+  def call(rpcName: String, args: BMap[String,RawValue]): Future[RawValue]
+  def get(rpcName: String, args: BMap[String,RawValue]): RawRPC
 }
 ```
 
@@ -135,17 +135,17 @@ What's left is the `get` method. It's supposed to return a raw form of RPC subin
 ```scala
 import SimpleRPCFramework._
 
-// `RawInvocation` comes from `SimpleRPCFramework` and contains rpcName and argLists of all invoked getters
+// `RawInvocation` comes from `SimpleRPCFramework` and contains rpcName and args of all invoked getters
 class AjaxRawRPC(getterChain: List[RawInvocation]) extends RawRPC {
-  def fire(rpcName: String, argLists: List[List[RawValue]]): Unit = { 
+  def fire(rpcName: String, args: BMap[String,RawValue]): Unit = {
     // send RPC invocation along with the getter chain using AJAX
   } 
-  def call(rpcName: String, argLists: List[List[RawValue]]): Future[RawValue] = {
+  def call(rpcName: String, args: BMap[String,RawValue]): Future[RawValue] = {
     // send RPC invocation along with the getter chain using AJAX
   }
   // `get` method simply adds the getter invocation to the stack and returns the same implementation of `RawRPC`
-  def get(rpcName: String, argLists: List[List[RawValue]]): RawRPC =
-    new AjaxRawRPC(RawInvocation(rpcName, argLists) :: getterChain)
+  def get(rpcName: String, args: BMap[String,RawValue]): RawRPC =
+    new AjaxRawRPC(RawInvocation(rpcName, args) :: getterChain)
 }
 ```
 
@@ -249,9 +249,9 @@ val rawRpc: RawRPC = AsRawRPC[Services].asRaw(realRpc)
 
 object SimpleHandler extends RequestHandler {
   def handleFire(getterChain: List[RawInvocation], finalFire: RawInvocation): Unit =
-    rawRpc.resolveGetterChain(getterChain).fire(finalFire.rpcName, finalFire.argLists)
+    rawRpc.resolveGetterChain(getterChain).fire(finalFire.rpcName, finalFire.args)
   def handleCall(getterChain: List[RawInvocation], finalCall: RawInvocation): Future[RawValue] =
-    rawRpc.resolveGetterChain(getterChain).call(finalFire.rpcName, finalFire.argLists)
+    rawRpc.resolveGetterChain(getterChain).call(finalFire.rpcName, finalFire.args)
 }
 ```
 
@@ -272,27 +272,27 @@ import SimpleRPCFramework._
 
 val rawRpc: RawRPC = new AsRawRPC[Services] {
   def asRaw(services: Services) = new RawRPC {
-    def fire(rpcName: String, argLists: List[List[RawValue]]) = 
-      fail("Services", "procedure", rpcName, argLists)
-    def call(rpcName: String, argLists: List[List[RawValue]]) = 
-      fail("Services", "function", rpcName, argLists)
-    def get(rpcName: String, argLists: List[List[RawValue]]) = (rpcName, argLists) match {
+    def fire(rpcName: String, args: BMap[String,RawValue]) =
+      fail("Services", "procedure", rpcName, args)
+    def call(rpcName: String, args: BMap[String,RawValue]) =
+      fail("Services", "function", rpcName, args)
+    def get(rpcName: String, args: BMap[String,RawValue]) = (rpcName, args) match {
       case ("userService", Nil) => new AsRawRPC[UserService] {
         def asRaw(userService: UserService) = new RawRPC {
-          def fire(rpcName: String, argLists: List[List[RawValue]]) = (rpcName, argLists) match {
+          def fire(rpcName: String, args: BMap[String,RawValue]) = (rpcName, args) match {
             case ("addIfAbsent", List(List(user))) => userService.addIfAbsent(read[User](user))
-            case _ => fail("UserService", "procedure", rpcName, argLists)
+            case _ => fail("UserService", "procedure", rpcName, args)
           }
-          def call(rpcName: String, argLists: List[List[RawValue]]) = (rpcName, argLists) match {
+          def call(rpcName: String, args: BMap[String,RawValue]) = (rpcName, args) match {
             case ("findById", List(List(id))) =>
               userService.findById(read[String](id)).map(user => write[User](user))
-            case _ => fail("UserService", "function", rpcName, argLists)
+            case _ => fail("UserService", "function", rpcName, args)
           }
-          def get(rpcName: String, argLists: List[List[RawValue]]) = 
-            fail("UserService", "getter", rpcName, argLists)
+          def get(rpcName: String, args: BMap[String,RawValue]) =
+            fail("UserService", "getter", rpcName, args)
         }
       }.asRaw(services.userService)
-      case _ => fail("Services", "getter", rpcName, argLists)
+      case _ => fail("Services", "getter", rpcName, args)
     }
   }
 }.asRaw(realRpc)
@@ -342,7 +342,7 @@ val rawRpc: RawRPC = AsRawRPC[UserService].asRaw(realRpc)
 object SimpleHandler extends RequestHandler {
   // let's ignore `getterChain` and `handleFire`
   def handleCall(invocation: RawInvocation): Future[RawValue] =
-    rawRpc.call(invocation.rpcName, invocation.argLists)
+    rawRpc.call(invocation.rpcName, invocation.args)
 }
 ```
 
@@ -362,7 +362,7 @@ object SimpleHandler extends RequestHandler {
     val perms = rpcMd.signatures(invocation.rpcName).annotations
       .collectFirst({case RequiresPermissions(perms) => perms})
       .getOrElse(Nil)
-    if(validatePermissions(perms)) rawRpc.call(invocation.rpcName, invocation.argLists)
+    if(validatePermissions(perms)) rawRpc.call(invocation.rpcName, invocation.args)
     else Future.failed(new Exception("Forbidden!"))
   }
 }

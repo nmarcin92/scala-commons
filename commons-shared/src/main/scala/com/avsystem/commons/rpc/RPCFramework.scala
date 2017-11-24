@@ -2,9 +2,10 @@ package com.avsystem.commons
 package rpc
 
 import scala.annotation.implicitNotFound
+import scala.collection.immutable.ListMap
 import scala.language.higherKinds
 
-trait RPCFramework {
+trait RPCFramework extends MacroInstances {
   type RawValue
   type Reader[T]
   type Writer[T]
@@ -20,8 +21,8 @@ trait RPCFramework {
     @inline def apply[T](implicit metadata: RPCMetadata[T]): RPCMetadata[T] = metadata
   }
 
-  @implicitNotFound("This RPC framework doesn't support RPC methods that return ${Real} " +
-    "or some implicit dependencies may be missing (e.g. Writer[A] when result type is Future[A])")
+  @implicitNotFound("Can't handle an RPC method that returns ${Real}.\n" +
+    "Some implicit dependencies may be missing (e.g. appropriate Writer when result type is wrapped in a Future)")
   trait RealInvocationHandler[Real, Raw] {
     def toRaw(real: Real): Raw
   }
@@ -32,23 +33,27 @@ trait RPCFramework {
       }
   }
 
-  @implicitNotFound("This RPC framework doesn't support RPC methods that return ${Real} " +
-    "or some implicit dependencies may be missing (e.g. Reader[A] when result type is Future[A])")
+  @implicitNotFound("Can't handle an RPC method that returns ${Real}.\n" +
+    "Some implicit dependencies may be missing (e.g. appropriate Reader when result type is wrapped in a Future)")
   trait RawInvocationHandler[Real] {
-    def toReal(rawRpc: RawRPC, rpcName: String, argLists: List[List[RawValue]]): Real
+    def toReal(rawRpc: RawRPC, rpcName: String, args: BMap[String, RawValue]): Real
   }
   object RawInvocationHandler {
-    def apply[Real](fun: (RawRPC, String, List[List[RawValue]]) => Real): RawInvocationHandler[Real] =
+    def apply[Real](fun: (RawRPC, String, BMap[String, RawValue]) => Real): RawInvocationHandler[Real] =
       new RawInvocationHandler[Real] {
-        def toReal(rawRpc: RawRPC, rpcName: String, argLists: List[List[RawValue]]) = fun(rawRpc, rpcName, argLists)
+        def toReal(rawRpc: RawRPC, rpcName: String, args: BMap[String, RawValue]) = fun(rawRpc, rpcName, args)
       }
   }
 
-  trait RawRPCUtils {
-    protected def fail(rpcTpe: String, rawMethodName: String, methodName: String, args: List[List[RawValue]]) = {
-      val argsRepr = args.map(_.mkString("[", ",", "]")).mkString("[", ",", "]")
-      throw new Exception(s"$methodName in $rpcTpe with arguments $argsRepr cannot be handled by raw method $rawMethodName")
-    }
+  trait RPCUtils {
+    protected def readParam[T: Reader](rpcName: String, args: BMap[String, RawValue], paramName: String): T =
+      read[T](args.getOrElse(paramName, throw RPCException(s"Parameter $paramName for RPC method $rpcName is absent")))
+
+    protected def badInvocation(rpcTpe: String, rawMethodName: String, methodName: String) =
+      throw RPCException(s"$methodName in $rpcTpe cannot be handled by raw method $rawMethodName")
+
+    protected def createRawArgs(pairs: (String, RawValue)*): BMap[String, RawValue] =
+      ListMap(pairs: _*)
   }
 
   trait AsRawRPC[T] {

@@ -18,7 +18,7 @@ class RPCFrameworkMacros(ctx: blackbox.Context) extends AbstractMacroCommons(ctx
   val AsRealRPCObj = q"$FrameworkObj.AsRealRPC"
   val AsRealRPCCls = tq"$FrameworkObj.AsRealRPC"
   val RawValueCls = tq"$FrameworkObj.RawValue"
-  val ArgListsCls = tq"$ListCls[$ListCls[$RawValueCls]]"
+  val ArgsCls = tq"$CollectionPkg.Map[$StringCls,$RawValueCls]"
   val RealInvocationHandlerCls = tq"$FrameworkObj.RealInvocationHandler"
   val RawInvocationHandlerCls = tq"$FrameworkObj.RawInvocationHandler"
   val RPCMetadataObj = q"$FrameworkObj.RPCMetadata"
@@ -30,7 +30,7 @@ class RPCFrameworkMacros(ctx: blackbox.Context) extends AbstractMacroCommons(ctx
   lazy val RPCType = getType(tq"$RpcPackage.RPC")
   lazy val MetadataAnnotationType = getType(tq"$RpcPackage.MetadataAnnotation")
   lazy val RawValueType = getType(RawValueCls)
-  lazy val RawValueLLType = getType(ArgListsCls)
+  lazy val RawValueMapType = getType(ArgsCls)
   lazy val RawRPCType = getType(RawRPCCls)
   lazy val RawRPCSym = RawRPCType.typeSymbol
   lazy val RPCCompanionSym = RPCFrameworkType.member(TypeName("RPCCompanion"))
@@ -46,26 +46,25 @@ class RPCFrameworkMacros(ctx: blackbox.Context) extends AbstractMacroCommons(ctx
 
   case class Variant(rawMethod: MethodSymbol, returnType: Type)
 
-  lazy val variants = RawRPCType.members.filter(s => s.isTerm && s.isAbstract)
-    .map { s =>
-      if (s.isMethod) {
-        val m = s.asMethod
-        val sig = m.typeSignatureIn(RawRPCType)
-        if (sig.typeParams.nonEmpty) {
-          abort(s"Bad signature ($m): RPC variant cannot be generic")
-        }
-        val returnType = sig.paramLists match {
-          case List(List(rpcNameParam, argListsParam))
-            if rpcNameParam.typeSignature =:= typeOf[String] && argListsParam.typeSignature =:= RawValueLLType =>
-            sig.finalResultType
-          case _ =>
-            abort(s"Bad signature ($m): RPC variant must take two parameters of types String and List[List[RawValue]]")
-        }
-        Variant(m, returnType)
-      } else {
-        abort("All abstract members in RawRPC must be methods that take two parameters of types String and List[List[RawValue]]")
+  lazy val variants = RawRPCType.members.filter(s => s.isTerm && s.isAbstract).map { s =>
+    if (s.isMethod) {
+      val m = s.asMethod
+      val sig = m.typeSignatureIn(RawRPCType)
+      if (sig.typeParams.nonEmpty) {
+        abort(s"Bad signature ($m): RPC variant cannot be generic")
       }
-    }.toList
+      val returnType = sig.paramLists match {
+        case List(List(rpcNameParam, argsParam))
+          if typeOf[String] <:< rpcNameParam.typeSignature && RawValueMapType <:< argsParam.typeSignature =>
+          sig.finalResultType
+        case _ =>
+          abort(s"Bad signature ($m): RPC variant must take two parameters of types String and BMap[String, RawValue]")
+      }
+      Variant(m, returnType)
+    } else {
+      abort("All abstract members in RawRPC must be methods that take two parameters of types String and BMap[String, RawValue]")
+    }
+  }.toList
 
   case class ProxyableMember(method: MethodSymbol, signature: Type) {
     val returnType = signature.finalResultType
@@ -136,37 +135,37 @@ class RPCFrameworkMacros(ctx: blackbox.Context) extends AbstractMacroCommons(ctx
 
     def methodCase(variant: Variant, member: ProxyableMember): Option[CaseDef] = {
       val paramLists = member.signature.paramLists
-      val matchedArgs = reifyListPat(paramLists.map(paramList => reifyListPat(paramList.map(ps => pq"${ps.name.toTermName}"))))
-      val methodArgs = paramLists.map(_.map(ps => q"$FrameworkObj.read[${ps.typeSignature}](${ps.name.toTermName})"))
+      val methodArgs = paramLists.map(_.map(ps =>
+        q"readParam[${ps.typeSignature}](methodName, args, ${ps.name.decodedName.toString})"))
       val realInvocation = q"$implName.${member.method}(...$methodArgs)"
       val handlerType = getType(tq"$RealInvocationHandlerCls[${member.returnType},_]")
       val expectedHandlerType = getType(tq"$RealInvocationHandlerCls[${member.returnType},${variant.returnType}]")
 
       c.inferImplicitValue(handlerType) match {
         case EmptyTree =>
-          Some(cq"(${member.rpcNameString}, $matchedArgs) => implicitly[$expectedHandlerType].toRaw($realInvocation)") //force normal compilation error
+          Some(cq"${member.rpcNameString} => implicitly[$expectedHandlerType].toRaw($realInvocation)") //force normal compilation error
         case handler if handler.tpe <:< expectedHandlerType =>
-          Some(cq"""(${member.rpcNameString}, $matchedArgs) => $FrameworkObj.tryToRaw[${member.returnType},${variant.returnType}]($realInvocation)""")
+          Some(cq"""${member.rpcNameString} => $FrameworkObj.tryToRaw[${member.returnType},${variant.returnType}]($realInvocation)""")
         case _ => None
       }
     }
 
     def defaultCase(variant: Variant): CaseDef =
-      cq"_ => fail(${rpcTpe.toString}, ${variant.rawMethod.name.toString}, methodName, args)"
+      cq"_ => badInvocation(${rpcTpe.toString}, ${variant.rawMethod.name.decodedName.toString}, methodName)"
 
     def methodMatch(variant: Variant, methods: Iterable[ProxyableMember]) = {
-      Match(q"(methodName, args)",
+      Match(q"methodName",
         (methods.flatMap(m => methodCase(variant, m)) ++ Iterator(defaultCase(variant))).toList
       )
     }
 
     def rawImplementation(variant: Variant) =
-      q"def ${variant.rawMethod.name}(methodName: String, args: $ListCls[$ListCls[$RawValueCls]]) = ${methodMatch(variant, proxyables)}"
+      q"def ${variant.rawMethod.name}(methodName: $StringCls, args: $ArgsCls) = ${methodMatch(variant, proxyables)}"
 
     // Thanks to `Materialized` trait, the implicit "self" has more specific type than a possible implicit
     // that this macro invocation is assigned to.
     q"""
-      new $AsRawRPCCls[$rpcTpe] with $FrameworkObj.RawRPCUtils with $MaterializedCls {
+      new $AsRawRPCCls[$rpcTpe] with $FrameworkObj.RPCUtils with $MaterializedCls {
         private implicit def ${c.freshName(TermName("self"))}: $AsRawRPCCls[$rpcTpe] with $MaterializedCls = this
 
         def asRaw($implName: $rpcTpe) =
@@ -200,8 +199,10 @@ class RPCFrameworkMacros(ctx: blackbox.Context) extends AbstractMacroCommons(ctx
         ValDef(Modifiers(Flag.PARAM | implicitFlag), ps.name.toTermName, TypeTree(ps.typeSignature), EmptyTree)
       })
 
-      val args = reifyList(paramLists.map(paramList =>
-        reifyList(paramList.map(ps => q"$FrameworkObj.write[${ps.typeSignature}](${ps.name.toTermName})"))))
+      def writeParam(ps: Symbol) =
+        q"$FrameworkObj.write[${ps.typeSignature}](${ps.name.toTermName})"
+
+      val args = q"createRawArgs(..${paramLists.flatten.map(ps => q"(${ps.name.decodedName.toString}, ${writeParam(ps)})")})"
 
       q"def $methodName(...$params) = implicitly[$RawInvocationHandlerCls[${m.returnType}]].toReal($rawRpcName, ${m.rpcNameString}, $args)"
     }
@@ -209,7 +210,7 @@ class RPCFrameworkMacros(ctx: blackbox.Context) extends AbstractMacroCommons(ctx
     // Thanks to `Materialized` trait, the implicit "self" has more specific type than a possible implicit
     // that this macro invocation is assigned to.
     q"""
-      new $AsRealRPCCls[$rpcTpe] with $MaterializedCls {
+      new $AsRealRPCCls[$rpcTpe] with $FrameworkObj.RPCUtils with $MaterializedCls {
         private implicit def ${c.freshName(TermName("self"))}: $AsRealRPCCls[$rpcTpe] with $MaterializedCls = this
 
         def asReal($rawRpcName: $RawRPCCls) = new $rpcTpe { ..$implementations; () }

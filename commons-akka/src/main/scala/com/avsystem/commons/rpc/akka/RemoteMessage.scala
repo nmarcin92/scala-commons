@@ -11,8 +11,11 @@ import com.avsystem.commons.serialization.GenCodec
 private sealed trait RemoteMessage extends Serializable
 
 private object RemoteMessage {
-  implicit val byteStringCodec = GenCodec.create[ByteString](input => ByteString(input.readBinary()), (output, byteString) => output.writeBinary(byteString.toArray))
-  implicit val rawInvocationCodec = GenCodec.materialize[RawInvocation]
+  implicit val byteStringCodec: GenCodec[ByteString] = GenCodec.create[ByteString](
+    input => ByteString(input.readBinary()),
+    (output, byteString) => output.writeBinary(byteString.toArray)
+  )
+  implicit val rawInvocationCodec: GenCodec[RawInvocation] = GenCodec.materialize[RawInvocation]
 
   implicit val procedureInvocationMessageCodec: GenCodec[ProcedureInvocationMessage] = GenCodec.materialize[ProcedureInvocationMessage]
   implicit val functionInvocationMessageCodec: GenCodec[FunctionInvocationMessage] = GenCodec.materialize[FunctionInvocationMessage]
@@ -28,16 +31,16 @@ private object RemoteMessage {
   implicit val heatBeatCodec: GenCodec[MonixProtocol.Heartbeat.type] = GenCodec.materialize[MonixProtocol.Heartbeat.type]
 }
 
-private final case class RawInvocation(rpcName: String, argLists: List[List[RawValue]]) extends RemoteMessage
+private final case class RawInvocation(rpcName: String, args: BMap[String, RawValue]) extends RemoteMessage
 
 private sealed trait InvocationMessage extends RemoteMessage {
   def getterChain: Seq[RawInvocation]
   def name: String
-  def argLists: List[List[RawValue]]
+  def args: BMap[String, RawValue]
 }
-private final case class ProcedureInvocationMessage(name: String, argLists: List[List[RawValue]], getterChain: Seq[RawInvocation]) extends InvocationMessage
-private final case class FunctionInvocationMessage(name: String, argLists: List[List[RawValue]], getterChain: Seq[RawInvocation]) extends InvocationMessage
-private final case class ObservableInvocationMessage(name: String, argLists: List[List[RawValue]], getterChain: Seq[RawInvocation]) extends InvocationMessage
+private final case class ProcedureInvocationMessage(name: String, args: BMap[String, RawValue], getterChain: Seq[RawInvocation]) extends InvocationMessage
+private final case class FunctionInvocationMessage(name: String, args: BMap[String, RawValue], getterChain: Seq[RawInvocation]) extends InvocationMessage
+private final case class ObservableInvocationMessage(name: String, args: BMap[String, RawValue], getterChain: Seq[RawInvocation]) extends InvocationMessage
 
 private sealed trait InvocationResult extends RemoteMessage
 private final case class InvocationSuccess(value: RawValue) extends InvocationResult

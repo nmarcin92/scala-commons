@@ -9,7 +9,7 @@ trait ProcedureRPCFramework extends RPCFramework {
   type RawRPC <: ProcedureRawRPC
 
   trait ProcedureRawRPC { this: RawRPC =>
-    def fire(rpcName: String, argLists: List[List[RawValue]]): Unit
+    def fire(rpcName: String, args: BMap[String, RawValue]): Unit
   }
 
   implicit val ProcedureRealHandler: RealInvocationHandler[Unit, Unit] =
@@ -26,13 +26,13 @@ trait FunctionRPCFramework extends RPCFramework {
   type RawRPC <: FunctionRawRPC
 
   trait FunctionRawRPC { this: RawRPC =>
-    def call(rpcName: String, argLists: List[List[RawValue]]): Future[RawValue]
+    def call(rpcName: String, args: BMap[String, RawValue]): Future[RawValue]
   }
 
   implicit def FunctionRealHandler[A: Writer]: RealInvocationHandler[Future[A], Future[RawValue]] =
-    RealInvocationHandler[Future[A], Future[RawValue]](_.mapNow(write[A] _))
+    RealInvocationHandler[Future[A], Future[RawValue]](_.mapNow(write[A]))
   implicit def FunctionRawHandler[A: Reader]: RawInvocationHandler[Future[A]] =
-    RawInvocationHandler[Future[A]]((rawRpc, rpcName, argLists) => rawRpc.call(rpcName, argLists).mapNow(read[A] _))
+    RawInvocationHandler[Future[A]]((rawRpc, rpcName, args) => rawRpc.call(rpcName, args).mapNow(read[A]))
 }
 
 /**
@@ -41,13 +41,13 @@ trait FunctionRPCFramework extends RPCFramework {
 trait GetterRPCFramework extends RPCFramework {
   type RawRPC <: GetterRawRPC
 
-  case class RawInvocation(rpcName: String, argLists: List[List[RawValue]])
+  case class RawInvocation(rpcName: String, args: BMap[String, RawValue])
 
   trait GetterRawRPC { this: RawRPC =>
-    def get(rpcName: String, argLists: List[List[RawValue]]): RawRPC
+    def get(rpcName: String, args: BMap[String, RawValue]): RawRPC
 
     def resolveGetterChain(getters: List[RawInvocation]): RawRPC =
-      getters.foldRight(this)((inv, rpc) => rpc.get(inv.rpcName, inv.argLists))
+      getters.foldRight(this)((inv, rpc) => rpc.get(inv.rpcName, inv.args))
   }
 
   // these must be macros in order to properly handle recursive RPC types
@@ -58,7 +58,7 @@ trait GetterRPCFramework extends RPCFramework {
     def toRaw(real: T) = AsRawRPC[T].asRaw(real)
   }
   final class GetterRawHandler[T: AsRealRPC] extends RawInvocationHandler[T] {
-    def toReal(rawRpc: RawRPC, rpcName: String, argLists: List[List[RawValue]]) = AsRealRPC[T].asReal(rawRpc.get(rpcName, argLists))
+    def toReal(rawRpc: RawRPC, rpcName: String, args: BMap[String, RawValue]) = AsRealRPC[T].asReal(rawRpc.get(rpcName, args))
   }
 }
 

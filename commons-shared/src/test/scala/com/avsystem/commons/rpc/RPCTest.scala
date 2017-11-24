@@ -19,55 +19,55 @@ class RPCTest extends WordSpec with Matchers with BeforeAndAfterAll {
 
   "rpc caller" should {
     "should properly deserialize RPC calls" in {
-      val invocations = new ArrayBuffer[(String, List[List[Any]])]
+      val invocations = new ArrayBuffer[(String, BMap[String, Any])]
       val rawRpc = AsRawRPC[TestRPC].asRaw(TestRPC.rpcImpl((name, args, _) => {
         invocations += ((name, args))
         name
       }))
 
-      rawRpc.fire("handleMore", List(Nil))
-      rawRpc.fire("doStuff", List(List(42, "omgsrsly"), List(Some(true))))
-      assert("doStuffResult" === get(rawRpc.call("doStuffBoolean", List(List(true)))))
-      rawRpc.fire("doStuffInt", List(List(5)))
-      rawRpc.fire("handleMore", List(Nil))
-      rawRpc.fire("handle", Nil)
-      rawRpc.fire("srslyDude", List(Nil))
-      rawRpc.get("innerRpc", List(List("innerName"))).fire("proc", List(Nil))
-      assert("innerRpc.funcResult" === get(rawRpc.get("innerRpc", List(List("innerName"))).call("func", List(List(42)))))
+      rawRpc.fire("handleMore", Map.empty)
+      rawRpc.fire("doStuff", Map("lol" -> 42, "fuu" -> "omgsrsly", "cos" -> Some(true)))
+      assert("doStuffResult" === get(rawRpc.call("doStuffBoolean", Map("yes" -> true))))
+      rawRpc.fire("doStuffInt", Map("num" -> 5))
+      rawRpc.fire("handleMore", Map.empty)
+      rawRpc.fire("handle", Map.empty)
+      rawRpc.fire("srslyDude", Map.empty)
+      rawRpc.get("innerRpc", Map("name" -> "innerName")).fire("proc", Map.empty)
+      assert("innerRpc.funcResult" === get(rawRpc.get("innerRpc", Map("name" -> "innerName")).call("func", Map("arg" -> 42))))
 
       assert(invocations.toList === List(
-        ("handleMore", List(Nil)),
-        ("doStuff", List(List(42, "omgsrsly"), List(Some(true)))),
-        ("doStuffBoolean", List(List(true))),
-        ("doStuffInt", List(List(5))),
-        ("handleMore", List(Nil)),
-        ("handle", Nil),
-        ("srslyDude", List(Nil)),
-        ("innerRpc", List(List("innerName"))),
-        ("innerRpc.proc", List(Nil)),
-        ("innerRpc", List(List("innerName"))),
-        ("innerRpc.func", List(List(42)))
+        ("handleMore", Map.empty),
+        ("doStuff", Map("lol" -> 42, "fuu" -> "omgsrsly", "cos" -> Some(true))),
+        ("doStuffBoolean", Map("yes" -> true)),
+        ("doStuffInt", Map("num" -> 5)),
+        ("handleMore", Map.empty),
+        ("handle", Map.empty),
+        ("srslyDude", Map.empty),
+        ("innerRpc", Map("name" -> "innerName")),
+        ("innerRpc.proc", Map.empty),
+        ("innerRpc", Map("name" -> "innerName")),
+        ("innerRpc.func", Map("arg" -> 42))
       ))
     }
 
     "fail on bad input" in {
       val rawRpc = AsRawRPC[TestRPC].asRaw(TestRPC.rpcImpl((_, _, _) => ()))
-      intercept[Exception](rawRpc.fire("whatever", Nil))
+      intercept[Exception](rawRpc.fire("whatever", Map.empty))
     }
 
     "real rpc should properly serialize calls to raw rpc" in {
-      val invocations = new ArrayBuffer[(String, List[List[Any]])]
+      val invocations = new ArrayBuffer[(String, BMap[String, Any])]
 
       object rawRpc extends RawRPC with RunNowFutureCallbacks {
-        def fire(rpcName: String, args: List[List[Any]]): Unit =
+        def fire(rpcName: String, args: BMap[String, Any]): Unit =
           invocations += ((rpcName, args))
 
-        def call(rpcName: String, args: List[List[Any]]): Future[Any] = {
+        def call(rpcName: String, args: BMap[String, Any]): Future[Any] = {
           invocations += ((rpcName, args))
           Future.successful(rpcName + "Result")
         }
 
-        def get(rpcName: String, args: List[List[Any]]): RawRPC = {
+        def get(rpcName: String, args: BMap[String, Any]): RawRPC = {
           invocations += ((rpcName, args))
           this
         }
@@ -86,20 +86,20 @@ class RPCTest extends WordSpec with Matchers with BeforeAndAfterAll {
       realRpc.innerRpc("innerName").moreInner("moreInner").moreInner("evenMoreInner").func(42)
 
       assert(invocations.toList === List(
-        ("handleMore", List(Nil)),
-        ("doStuff", List(List(42, "omgsrsly"), List(Some(true)))),
-        ("doStuffBoolean", List(List(true))),
-        ("doStuffInt", List(List(5))),
-        ("handleMore", List(Nil)),
-        ("handle", Nil),
+        ("handleMore", Map.empty),
+        ("doStuff", Map("lol" -> 42, "fuu" -> "omgsrsly", "cos" -> Some(true))),
+        ("doStuffBoolean", Map("yes" -> true)),
+        ("doStuffInt", Map("num" -> 5)),
+        ("handleMore", Map.empty),
+        ("handle", Map.empty),
 
-        ("innerRpc", List(List("innerName"))),
-        ("proc", List(Nil)),
+        ("innerRpc", Map("name" -> "innerName")),
+        ("proc", Map.empty),
 
-        ("innerRpc", List(List("innerName"))),
-        ("moreInner", List(List("moreInner"))),
-        ("moreInner", List(List("evenMoreInner"))),
-        ("func", List(List(42)))
+        ("innerRpc", Map("name" -> "innerName")),
+        ("moreInner", Map("name" -> "moreInner")),
+        ("moreInner", Map("name" -> "evenMoreInner")),
+        ("func", Map("arg" -> 42))
       ))
     }
 

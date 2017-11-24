@@ -13,24 +13,19 @@ object JsonJettyRPCFramework extends JettyRPCFramework {
 
   def valueToJson(value: RawValue) = upickle.json.write(value)
   def jsonToValue(json: String) = upickle.json.read(json)
-  def argsToJson(args: List[List[RawValue]]) = upickle.json.write(argsToJsArr(args))
-  def jsonToArgs(json: String) = jsArrToArgs(upickle.json.read(json))
+  def argsToJson(args: BMap[String, RawValue]) = upickle.json.write(argsToJsObj(args))
+  def jsonToArgs(json: String) = jsObjToArgs(upickle.json.read(json))
 
   def read[T: Reader](raw: RawValue): T = GenCodec.read[T](new JsValueInput(raw))
   def write[T: Writer](value: T): RawValue = JsValueOutput.write[T](value)
 
-  def argsToJsArr(argLists: List[List[Js.Value]]): Js.Value = {
-    Js.Arr(argLists map { args => Js.Arr(args: _*) }: _*)
-  }
+  def argsToJsObj(args: BMap[String, Js.Value]): Js.Value =
+    Js.Obj(args.toList: _*)
 
-  def jsArrToArgs(value: Js.Value): List[List[Js.Value]] = {
+  def jsObjToArgs(value: Js.Value): BMap[String, Js.Value] = {
     value match {
-      case array: Js.Arr =>
-        (array.value map {
-          case nestedArray: Js.Arr => nestedArray.value.toList
-          case _ => List()
-        }).toList
-      case _ => List()
+      case obj: Js.Obj => obj.value.toMap
+      case _ => Map.empty
     }
   }
 }

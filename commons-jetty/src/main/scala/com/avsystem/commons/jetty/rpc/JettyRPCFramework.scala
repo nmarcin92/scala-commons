@@ -19,21 +19,20 @@ trait JettyRPCFramework extends StandardRPCFramework {
   def valueToJson(value: RawValue): String
   def jsonToValue(json: String): RawValue
 
-  def argsToJson(args: List[List[RawValue]]): String
-  def jsonToArgs(json: String): List[List[RawValue]]
+  def argsToJson(args: BMap[String, RawValue]): String
+  def jsonToArgs(json: String): BMap[String, RawValue]
 
   class RPCClient(httpClient: HttpClient, urlPrefix: String)(implicit ec: ExecutionContext) {
     private class RawRPCImpl(pathPrefix: String) extends RawRPC {
-      def fire(rpcName: String, argLists: List[List[RawValue]]): Unit =
-        put(pathPrefix + rpcName, argsToJson(argLists))
+      def fire(rpcName: String, args: BMap[String, RawValue]): Unit =
+        put(pathPrefix + rpcName, argsToJson(args))
 
-      def call(rpcName: String, argLists: List[List[RawValue]]): Future[RawValue] =
-        post(pathPrefix + rpcName, argsToJson(argLists)).map(jsonToValue)
+      def call(rpcName: String, args: BMap[String, RawValue]): Future[RawValue] =
+        post(pathPrefix + rpcName, argsToJson(args)).map(jsonToValue)
 
-      def get(rpcName: String, argLists: List[List[RawValue]]): RawRPC = argLists match {
-        case Nil => new RawRPCImpl(s"$pathPrefix$rpcName/")
-        case _ => throw new IllegalArgumentException("Only no-arg list sub-RPCs are supported (without parenthesis)")
-      }
+      def get(rpcName: String, args: BMap[String, RawValue]): RawRPC =
+        if (args.isEmpty) new RawRPCImpl(s"$pathPrefix$rpcName/")
+        else throw new IllegalArgumentException("Only no-arg sub-RPCs are supported")
     }
 
     val rawRPC: RawRPC = new RawRPCImpl("")
@@ -102,11 +101,11 @@ trait JettyRPCFramework extends StandardRPCFramework {
       }
     }
 
-    type InvokeFunction[T] = (RawRPC, String, List[List[RawValue]]) => T
+    type InvokeFunction[T] = (RawRPC, String, BMap[String, RawValue]) => T
 
     def invoke[T](path: String, content: String)(f: InvokeFunction[T]): T = {
       val parts = path.split('/')
-      val targetRpc = parts.dropRight(1).foldLeft(rootRpc)(_.get(_, Nil))
+      val targetRpc = parts.dropRight(1).foldLeft(rootRpc)(_.get(_, Map.empty))
       val rpcName = parts.last
       val args = jsonToArgs(content)
       f(targetRpc, rpcName, args)
